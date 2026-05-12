@@ -25,15 +25,15 @@ async def async_setup(hass: HomeAssistant, config: dict):
 
     # Get correct integration path
     INTEGRATION_PATH = hass.config.path(f"custom_components/smarteefi")
-    
+
     # Full path to HACLI binary
     if(OS=='win'):
         HACLI = os.path.join(INTEGRATION_PATH, f"hacli-{OS}-{ARCH}", f"smarteefi-ha-cli.exe")
     else:
         HACLI = os.path.join(INTEGRATION_PATH, f"hacli-{OS}-{ARCH}", f"smarteefi-ha-cli")
-    
+
     set_executable_permissions(HACLI)
-    _LOGGER.debug(f"Using HACLI path: {HACLI}")    
+    _LOGGER.debug(f"Using HACLI path: {HACLI}")
 
     async def handle_refresh_devices(call):
         """Handle the service call to refresh devices."""
@@ -71,19 +71,19 @@ class SmarteefiDataUpdateCoordinator:
         """Initialize the coordinator without blocking startup."""
         # Get correct integration path
         INTEGRATION_PATH = self.hass.config.path(f"custom_components/smarteefi")
-        
+
         # Full path to HACLI binary
         if(OS=='win'):
             self._hacli_path = os.path.join(INTEGRATION_PATH, f"hacli-{OS}-{ARCH}", f"smarteefi-ha-cli.exe")
         else:
             self._hacli_path = os.path.join(INTEGRATION_PATH, f"hacli-{OS}-{ARCH}", f"smarteefi-ha-cli")
-        
+
         set_executable_permissions(self._hacli_path)
         _LOGGER.debug(f"Using HACLI path: {self._hacli_path}")
 
         # Track initial sync state
         self._is_initial_sync = True
-    
+
         # Start with initial sync interval
         self._setup_interval(INITIAL_SYNC_INTERVAL)
 
@@ -92,11 +92,11 @@ class SmarteefiDataUpdateCoordinator:
         # Remove previous interval if exists
         if self._unsub_interval:
             self._unsub_interval()
-    
+
         # Set up new interval
         self._unsub_interval = async_track_time_interval(
-            self.hass, 
-            self._async_update, 
+            self.hass,
+            self._async_update,
             timedelta(seconds=interval_seconds)
         )
         _LOGGER.debug(f"Set sync interval to {interval_seconds} seconds")
@@ -110,11 +110,11 @@ class SmarteefiDataUpdateCoordinator:
         # If this was the initial sync, switch to regular interval
         if self._is_initial_sync:
             self._is_initial_sync = False
-            self._setup_interval(SYNC_INTERVAL)        
-           
+            self._setup_interval(SYNC_INTERVAL)
+
         _LOGGER.debug("Performing periodic state sync for all Smarteefi devices")
         await self.async_sync_states()
-                
+
 
     async def async_sync_states(self, entity_id=None):
         """Sync states for all devices or a specific entity."""
@@ -132,19 +132,24 @@ class SmarteefiDataUpdateCoordinator:
                     await self._sync_device_state(device)
         else:
             combined_devices = {}
+            combined_cloudids = {}
 
             for device in devices:
                 parts = device["id"].split(':')
                 prefix = ':'.join(parts[:2])  # First two parts as key
                 value = int(parts[2])         # Third part as integer
-    
+
                 if prefix in combined_devices:
                     combined_devices[prefix] |= value
                 else:
                     combined_devices[prefix] = value
+                    combined_cloudids[prefix] = device.get("cloudid", "")  # preserve cloudid
 
-            # Create the new list of devices with combined IDs
-            new_devices = [{"id": f"{prefix}:{value}"} for prefix, value in combined_devices.items()]
+            # Create the new list of devices with combined IDs, preserving cloudid
+            new_devices = [
+                {"id": f"{prefix}:{value}", "cloudid": combined_cloudids[prefix]}
+                for prefix, value in combined_devices.items()
+            ]
 
             for index, device in enumerate(new_devices, 1):
                 _LOGGER.debug(f"Processing device {index} of {len(new_devices)}")
@@ -174,7 +179,7 @@ class SmarteefiDataUpdateCoordinator:
             if process.returncode == 0:
                 output = stdout.decode().strip()
                 _LOGGER.debug(f"State sync successful for {device['id']}: {output}")
-                
+
                 try:
                     status = int(output)
                     parts = device["id"].split(':')
@@ -184,7 +189,7 @@ class SmarteefiDataUpdateCoordinator:
                         for dev in devices:
                             dev_parts = dev['id'].split(':')
                             dev_prefix = ':'.join(dev_parts[:2])  # First two parts of device ID
-        
+
                             # Check if prefixes match
                             if dev_prefix == prefix:
                                 # Create var1 and var2
@@ -195,7 +200,10 @@ class SmarteefiDataUpdateCoordinator:
                                     {"smap": int(dev_parts[2]), "status": status}
                                 )
                 except ValueError:
-                    _LOGGER.error(f"Invalid status output for {device['id']}: {output}")
+                    if output.strip() == "Device Offline":
+                        _LOGGER.debug(f"Device {device['id']} is offline, skipping state update")
+                    else:
+                        _LOGGER.error(f"Invalid status output for {device['id']}: {output}")
             else:
                 _LOGGER.error(f"State sync failed for {device['id']}: {stderr.decode().strip()}")
         except Exception as e:
@@ -212,11 +220,11 @@ class SmarteefiDataUpdateCoordinator:
 async def start_udp_server(hass: HomeAssistant, ip_address: str, port: int):
     """Start UDP server to listen for device updates."""
     loop = asyncio.get_event_loop()
-    
+
     class SmarteefiUDPProtocol:
         def __init__(self):
             self.transport = None
-            
+
         def connection_made(self, transport):
             self.transport = transport
             sock = transport.get_extra_info('socket')
@@ -229,37 +237,37 @@ async def start_udp_server(hass: HomeAssistant, ip_address: str, port: int):
                 _LOGGER.debug("UDP socket configured for broadcast")
             except Exception as e:
                 _LOGGER.error(f"Error configuring socket: {e}")
-            
+
         def datagram_received(self, data, addr):
             """Handle incoming UDP packets with custom binary format."""
             try:
                 _LOGGER.debug(f"Received UDP packet from {addr}: {data.hex()}")
-                
+
                 # Verify minimum packet length (26 bytes)
                 if len(data) < 26:
                     _LOGGER.error(f"Packet too short: {len(data)} bytes")
                     return
-                
+
                 # Parse serial number (first 16 bytes, null-terminated)
                 serial_bytes = data[:16]
                 serial = serial_bytes.split(b'\x00')[0].decode('ascii')
-                
+
                 # Verify separators
                 if data[16] != ord(':') or data[21] != ord(':'):
                     _LOGGER.error("Invalid packet format - missing separators")
                     return
-                
+
                 # Parse smap (4 bytes little-endian)
                 smap = int.from_bytes(data[17:21], byteorder='little', signed=False)
-                
+
                 # Parse status (4 bytes little-endian)
                 status = int.from_bytes(data[22:26], byteorder='little', signed=False)
-                
+
                 _LOGGER.debug(f"Parsed packet - Serial: {serial}, Smap: {smap}, Status: {status}")
-                
+
                 # Create the entity matching pattern (serial:smap)
                 entity_match_id = f"{serial}:{smap}"
-                
+
                 # Signal all platforms to update
                 async_dispatcher_send(
                     hass,
@@ -269,7 +277,7 @@ async def start_udp_server(hass: HomeAssistant, ip_address: str, port: int):
                         "status": status
                     }
                 )
-                
+
             except Exception as e:
                 _LOGGER.error(f"Error processing UDP packet: {e}")
 
@@ -277,7 +285,7 @@ async def start_udp_server(hass: HomeAssistant, ip_address: str, port: int):
         transport, protocol = await loop.create_datagram_endpoint(
             lambda: SmarteefiUDPProtocol(),
             local_addr=('0.0.0.0', port))
-        
+
         _LOGGER.info(f"Started UDP server on {ip_address}:{port}")
         return transport
     except Exception as e:
@@ -288,7 +296,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up Smarteefi integration from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     apitoken = entry.data.get("apitoken")
-    
+
     if not apitoken:
         _LOGGER.error("API token is missing in config entry")
         return False
@@ -312,7 +320,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     udp_transport = await start_udp_server(hass, ip_address, udp_port)
     if udp_transport is None:
         _LOGGER.warning("UDP server failed to start, continuing without real-time updates")
-    
+
     hass.data[DOMAIN]["udp_transport"] = udp_transport
 
     # Initialize data coordinator
@@ -349,7 +357,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     else:
         # Devices are already in config_entry, no need to fetch
         await hass.config_entries.async_forward_entry_setups(entry, ["switch", "fan", "light", "cover"])
-    
+
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -357,11 +365,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if "udp_transport" in hass.data[DOMAIN] and hass.data[DOMAIN]["udp_transport"]:
         hass.data[DOMAIN]["udp_transport"].close()
         _LOGGER.info("Stopped UDP server")
-    
+
     if "coordinator" in hass.data[DOMAIN]:
         coordinator = hass.data[DOMAIN]["coordinator"]
         await coordinator.async_unload()
-    
+
     # Unload all platforms
     await hass.config_entries.async_forward_entry_unload(entry, ["switch", "fan", "light", "cover"])
     return True
