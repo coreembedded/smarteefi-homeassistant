@@ -119,7 +119,7 @@ class SmarteefiFan(FanEntity):
             self._percentage = 25
             self._speed = 1
 
-        if status == 0:
+        if status == 0 or (not r1 and not r2 and not r3):
             self._state = False
             self._speed = 0
             self._percentage = 0
@@ -192,7 +192,7 @@ class SmarteefiFan(FanEntity):
 
     async def async_turn_on(self, percentage: int | None = None, preset_mode: str | None = None, **kwargs) -> None:
         """Turn the fan on."""
-        _LOGGER.info("Turning on Smarteefi fan: %s perentage", self._name, percentage)
+        _LOGGER.info("Turning on Smarteefi fan: %s perentage: %s", self._name, percentage)
         if await self._execute_cli([self.ip_address, self.netmask, "set-status", self._unique_id, str(self._cloud_id), "1"]):
             self._state = True
             if percentage:

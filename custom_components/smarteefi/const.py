@@ -28,5 +28,5 @@ DOMAIN = 'smarteefi'
 ARCH = arch
 OS=os
 
-INITIAL_SYNC_INTERVAL = 5 # Sync interval for the first sync after HA Restart
-SYNC_INTERVAL = 300 # Sync interval in seconds (5 minutes)
+INITIAL_SYNC_INTERVAL = 3 # Sync interval for the first sync after HA Restart
+SYNC_INTERVAL = 5 # Sync interval in seconds (5 sec)
