@@ -363,7 +363,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_unload()
     
     # Unload all platforms
-    await hass.config_entries.async_forward_entry_unload(entry, ["switch", "fan", "light", "cover"])
+    await hass.config_entries.async_unload_platforms(entry, ["switch", "fan", "light", "cover"])
     return True
 
 def _get_interface_ip_and_netmask(interface):
@@ -462,7 +462,7 @@ async def async_refresh_devices(hass: HomeAssistant, entry: ConfigEntry):
         _LOGGER.info("Smarteefi devices refreshed: %s", devices)
 
         # Reload platforms to reflect new devices
-        await hass.config_entries.async_forward_entry_unload(entry, ["switch", "fan", "light", "cover"])
+        await hass.config_entries.async_unload_platforms(entry, ["switch", "fan", "light", "cover"])
         await hass.config_entries.async_forward_entry_setups(entry, ["switch", "fan", "light", "cover"])
 
     except Exception as e:
